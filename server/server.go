@@ -7,9 +7,13 @@ import (
 	"sync"
 )
 
+type Connection struct {
+	In <-chan ipc.Message
+	Out chan<- ipc.Message
+}
+
 type Server struct {
-	Inputs [](<-chan ipc.Message)
-	Outputs [](chan<- ipc.Message)
+	Conns []Connection
 	Db data.Database
 	// TODO: Logging
 }
@@ -19,56 +23,55 @@ func New() Server {
 }
 
 func (s *Server) Connect(c <-chan ipc.Message) <-chan ipc.Message {
-	s.Inputs = append(s.Inputs, c)
 	o := make(chan ipc.Message, 1)
-	s.Outputs = append(s.Outputs, o)
+	s.Conns = append(s.Conns, Connection{c, o})
 	return o
 }
 
-func (s *Server) handleReadResponse(rsp <-chan string, id int) {
+func handleReadResponse(rsp <-chan string, c Connection) {
 	go func() {
 		v := <-rsp
 		msg := ipc.Message{Type: ipc.RESULT, Payload: v}
-		s.Outputs[id] <- msg
+		c.Out <- msg
 	}()
 }
 
-func (s *Server) handleWriteResponse(rsp <-chan struct{}, id int) {
+func handleWriteResponse(rsp <-chan struct{}, c Connection) {
 	go func() {
 		<-rsp
 		msg := ipc.Message{Type: ipc.RESULT}
-		s.Outputs[id] <- msg
+		c.Out <- msg
 	}()
+}
+
+func (s *Server) serveConnection(c Connection, wg *sync.WaitGroup) {
+	// TODO: Add a logger that we send a stream of events to.
+	for msg := range c.In {
+		fmt.Println("[server] Got a message of type:", msg.Type)
+		switch msg.Type {
+			case ipc.READ:
+				res := s.Db.Read(msg.Key)
+				handleReadResponse(res, c)
+			case ipc.WRITE:
+				res := s.Db.Write(msg.Key, msg.Payload)
+				handleWriteResponse(res, c)
+			default:
+				// TODO
+		}
+	}
+
+	wg.Done()
 }
 
 func (s *Server) Run(done chan<- struct{}) {
 	fmt.Println("[server] Starting up")
-	fmt.Println("[server]", len(s.Inputs), "connected channels")
+	fmt.Println("[server]", len(s.Conns), "connected channels")
 	
 	var wg sync.WaitGroup
-	wg.Add(len(s.Inputs))
+	wg.Add(len(s.Conns))
 	
-	for i, _ := range s.Inputs {
-		fmt.Println(i)
-		go func(i int) {
-			fmt.Println("[server] Listening on channel", i)
-			// TODO: Add a logger that we send a stream of events to.
-			for msg := range s.Inputs[i] {
-				fmt.Println("Got a message of type:", msg.Type)
-				switch msg.Type {
-					case ipc.READ:
-						res := s.Db.Read(msg.Key)
-						s.handleReadResponse(res, i)
-					case ipc.WRITE:
-						res := s.Db.Write(msg.Key, msg.Payload)
-						s.handleWriteResponse(res, i)
-					default:
-						// TODO
-				}
-			}
-
-			wg.Done()
-		}(i)
+	for i, _ := range s.Conns {
+		go s.serveConnection(s.Conns[i], &wg)
 	}
 	
 	wg.Wait()
