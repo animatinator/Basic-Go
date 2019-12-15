@@ -70,8 +70,8 @@ func (s *Server) Run(done chan<- struct{}) {
 	var wg sync.WaitGroup
 	wg.Add(len(s.Conns))
 	
-	for i, _ := range s.Conns {
-		go s.serveConnection(s.Conns[i], &wg)
+	for _, c := range s.Conns {
+		go s.serveConnection(c, &wg)
 	}
 	
 	wg.Wait()
