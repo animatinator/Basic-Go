@@ -10,14 +10,14 @@ func main() {
 	fmt.Println("[main] Creating and starting server...")
 	s := server.New()
 	
-	// TODO: Wrap endpoints in CLients that perform some random behaviour
+	// TODO: Wrap endpoints in Clients that perform some random behaviour
 	e1 := endpoint.New(&s)
 	e2 := endpoint.New(&s)
 	
 	done := make(chan struct{})
 	go s.Run(done)
 	
-	// TODO: Remove this manual testing once CLients have been added
+	// TODO: Remove this manual testing once Clients have been added
 	e1.Write("hello", "world")
 	e2.Write("whats", "up")
 	fmt.Println("[main] Result after read: ", <- e1.Read("hello"))
